@@ -14,23 +14,13 @@ Simulating a galaxy means tracking the gravitational interaction of tens of thou
 
 Barnes-Hut reduces this to **O(N log N)** by exploiting a simple physical observation: a distant cluster of bodies can be approximated as a single body at the cluster's center of mass, as long as the cluster is small enough relative to the distance.
 
-The algorithm works by recursively subdividing space into a **quadtree** (in 2D) or octree (in 3D). Each node of the tree stores the total mass and center of mass of all bodies within its cell. When computing the force on a body, the tree is traversed from the root: if a node's cell is far enough away (controlled by the parameter θ), the whole subtree is approximated as a single mass. Otherwise the traversal recurses into the node's children.
-
-The accuracy criterion is:
-
-```
-s / d < θ
-```
-
-where `s` is the cell width and `d` is the distance to the cell's center of mass. Smaller θ means higher accuracy at the cost of more computation. This implementation uses `θ = 0.5`.
+The algorithm works by recursively subdividing space into a **quadtree** (in 2D) or octree (in 3D). Each node of the tree stores the total mass and center of mass of all bodies within its cell. When computing the force on a body, the tree is traversed from the root: if a node's cell is far enough away (controlled by the parameter θ), the whole subtree is approximated as a single mass. Otherwise the traversal recurses into the node's children. The accuracy criterion is s / d < θ where `s` is the cell width and `d` is the distance to the cell's center of mass. Smaller θ means higher accuracy at the cost of more computation. This implementation uses `θ = 0.5`.
 
 The original paper can be found here : Barnes, J., Hut, P. A hierarchical O(N log N) force-calculation algorithm. Nature 324, 446–449 (1986). https://doi.org/10.1038/324446a0
 
 ## Current Performance Bottleneck: Tree Construction
 
-The force computation is parallelized with TBB and scales well across cores. The **bottleneck is now the quadtree build**, which is done serially every timestep.
-
-Every iteration, all body states are snapshotted, the node pool is reset, and the tree is rebuilt from scratch by inserting bodies one at a time into the root. This insertion process is inherently sequential — each insertion modifies shared tree structure, so it cannot be parallelized naively.
+The force computation is parallelized with TBB and scales well across cores. The **bottleneck is now the quadtree build**, which is done serially every timestep. Every iteration, all body states are snapshotted, the node pool is reset, and the tree is rebuilt from scratch by inserting bodies one at a time into the root. This insertion process is inherently sequential — each insertion modifies shared tree structure, so it cannot be parallelized naively.
 
 At 50,000 bodies the tree build takes a significant fraction of total wall time, and its cost grows as O(N log N) with the body count. Possible directions to address this:
 
