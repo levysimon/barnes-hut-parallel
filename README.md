@@ -2,7 +2,7 @@
 
 A fast N-body gravity simulator written in C++17, using the Barnes-Hut algorithm to simulate the formation and rotation of a 2D galaxy disk. Parallelized with Intel TBB on Apple Silicon.
 
-![Galaxy simulation frame](bodies_2d/img000000.ppm)
+![Galaxy simulation](galaxy.gif)
 
 ---
 
