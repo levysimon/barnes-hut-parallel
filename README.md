@@ -1,37 +1,42 @@
 # Barnes-Hut 2D Galaxy Simulator
 
-A fast N-body gravity simulator written in C++17, using the Barnes-Hut algorithm to simulate the formation and rotation of a 2D galaxy disk. Parallelized with Intel TBB on Apple Silicon.
+A fast N-body gravity simulator in C++17 simulating galaxy formation and collisions using the Barnes-Hut algorithm. Parallelized with Intel TBB on Apple Silicon.
 
-![Galaxy simulation](galaxy.gif)
+![Galaxy collision](galaxy.gif)
 
----
+------------------------------------------------------------------------
 
 ## The N-body Problem
 
-Simulating a galaxy means tracking the gravitational interaction of tens of thousands of bodies. The naive approach computes the force between every pair of bodies — O(N²) work per timestep. At 50,000 bodies that is 2.5 billion pair evaluations every step, which is hopelessly slow.
+Simulating a galaxy means tracking the gravitational interaction of tens of thousands of bodies. The naive approach computes the force between every pair — O(N²) per timestep. At 50,000 bodies that's 2.5 billion pair evaluations every step, which is hopelessly slow.
 
 ## The Barnes-Hut Algorithm
 
-Barnes-Hut reduces this to **O(N log N)** by exploiting a simple physical observation: a distant cluster of bodies can be approximated as a single body at the cluster's center of mass, as long as the cluster is small enough relative to the distance.
+Barnes-Hut reduces this to **O(N log N)** by exploiting a simple physical observation: a distant cluster of bodies can be approximated as a single mass at its center of mass, as long as the cluster is small enough relative to the distance.
 
-The algorithm works by recursively subdividing space into a **quadtree** (in 2D) or octree (in 3D). Each node of the tree stores the total mass and center of mass of all bodies within its cell. When computing the force on a body, the tree is traversed from the root: if a node's cell is far enough away (controlled by the parameter θ), the whole subtree is approximated as a single mass. Otherwise the traversal recurses into the node's children. The accuracy criterion is s / d < θ where `s` is the cell width and `d` is the distance to the cell's center of mass. Smaller θ means higher accuracy at the cost of more computation. This implementation uses `θ = 0.5`.
+Space is recursively subdivided into a **quadtree**. When computing the force on a body, if a node's cell satisfies `s / d < θ` (cell width over distance), the whole subtree is treated as one mass. Otherwise the traversal recurses into its children. Smaller θ means higher accuracy at the cost of more work. We use `θ = 0.5`.
 
-The original paper can be found here : Barnes, J., Hut, P. A hierarchical O(N log N) force-calculation algorithm. Nature 324, 446–449 (1986). https://doi.org/10.1038/324446a0
+> Barnes, J., Hut, P. *A hierarchical O(N log N) force-calculation algorithm.* Nature 324, 446–449 (1986). <https://doi.org/10.1038/324446a0>
 
-## Current Performance Bottleneck: Tree Construction
+## Simulations
 
-The force computation is parallelized with TBB and scales well across cores. The **bottleneck is now the quadtree build**, which is done serially every timestep. Every iteration, all body states are snapshotted, the node pool is reset, and the tree is rebuilt from scratch by inserting bodies one at a time into the root. This insertion process is inherently sequential — each insertion modifies shared tree structure, so it cannot be parallelized naively.
+**`barneshut_2d.cpp`** — 50,000 bodies forming a single rotating disk. Good starting point for reading the code.
 
-At 50,000 bodies the tree build takes a significant fraction of total wall time, and its cost grows as O(N log N) with the body count. Possible directions to address this:
+**`barneshut_collision.cpp`** — three galaxies of 3,000 bodies each placed at the vertices of an equilateral triangle, converging at \~50% of escape velocity. Bodies are color-coded by galaxy (blue, orange, green) so you can track mixing during the merger.
 
-- **Parallel tree build** — sort bodies by their Z-order (Morton) curve index, then construct the tree bottom-up in parallel. This is the approach used in GPU N-body codes.
-- **Reduce rebuild frequency** — rebuild the tree every k steps and drift body positions between rebuilds (only valid if bodies don't move far).
-- **Task-parallel top-down construction** — split the root into quadrants and build each subtree on a separate thread, with synchronization only at the top few levels.
+## Current Bottleneck: Tree Construction
+
+Force computation is parallelized with TBB and scales well across cores. The **bottleneck is now the quadtree build**, which runs serially every timestep — each insertion modifies shared tree structure so it cannot be parallelized naively. At 50,000 bodies this is a significant fraction of wall time. Possible directions to address it:
+
+-   **Morton-code sort + bottom-up parallel build** — the approach used in GPU N-body codes
+-   **Reduce rebuild frequency** — reuse the tree for k steps, drifting positions between rebuilds
+-   **Task-parallel top-down construction** — build each quadrant subtree on a separate thread
 
 ## Build
 
-**With TBB (recommended, parallelized):**
-```bash
+**With TBB (recommended):**
+
+``` bash
 clang++ -O3 -std=c++17 \
   -mcpu=apple-m2 \
   -fomit-frame-pointer \
@@ -42,7 +47,8 @@ clang++ -O3 -std=c++17 \
 ```
 
 **Without TBB (serial fallback):**
-```bash
+
+``` bash
 g++ -O3 -march=native -std=c++17 -DNO_PARALLEL \
     -fno-math-errno -fno-trapping-math -ffinite-math-only \
     -fno-signed-zeros -ffp-contract=fast -funroll-loops \
@@ -51,31 +57,31 @@ g++ -O3 -march=native -std=c++17 -DNO_PARALLEL \
 
 ## Run
 
-```bash
+``` bash
 ./barneshut
 ```
 
 Frames are written as PPM images to `bodies_2d/`. Convert to video with:
 
-```bash
+``` bash
 ffmpeg -y -r 30 -pattern_type glob -i 'bodies_2d/*.ppm' \
   -vcodec libx264 -crf 18 -pix_fmt yuv420p bodies2d.mp4
 ```
 
 ## Parameters
 
-All simulation parameters are in the `cfg` namespace at the top of the file:
+All parameters are in the `cfg` namespace at the top of each file.
 
-| Parameter | Default | Description |
-|---|---|---|
-| `numbodies` | 50,000 | Number of bodies |
-| `max_iter` | 10,000 | Total timesteps |
-| `dt` | 5e-4 | Timestep size |
-| `theta` | 0.5 | Barnes-Hut accuracy (lower = more accurate) |
-| `ini_radius` | 0.18 | Initial disk radius |
-| `inivel` | 0.9 | Circular velocity scaling factor |
-| `G` | 4e-6 | Gravitational constant |
-| `img_iter` | 10 | Save a frame every N iterations |
+| Parameter    | Single galaxy | Collision | Description            |
+|--------------|---------------|-----------|------------------------|
+| `numbodies`  | 50,000        | 9,000     | Total body count       |
+| `max_iter`   | 10,000        | 20,000    | Total timesteps        |
+| `dt`         | 5e-4          | 5e-4      | Timestep size          |
+| `theta`      | 0.5           | 0.5       | Barnes-Hut accuracy    |
+| `ini_radius` | 0.18          | 0.11      | Disk radius            |
+| `G`          | 4e-6          | 4e-6      | Gravitational constant |
+
+Have fun with theses parameteres ! 
 
 ## Credits
 
